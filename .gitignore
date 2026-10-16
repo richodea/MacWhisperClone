@@ -1,0 +1,38 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+.build/
+DerivedData/
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Build artifacts
+*.o
+*.a
+*.dylib
+*.executable
+
+# Database
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# IDEs
+.vscode/
+.idea/
+
+# Secrets / API keys
+*.pem
+*.key
+.env

@@ -17,6 +17,9 @@ final class TranscriptionViewModel: ObservableObject {
     @Published var showError = false
     @Published var savedSessionIDs: Set<UUID> = []  // Track which tasks have been saved
     @Published var saveStatus: SaveStatus?
+    @Published var detectedLanguages: [UUID: LanguageDetectionResult] = [:]  // Per-task detection
+    @Published var isDetectingLanguage: Bool = false
+    @Published var languageDetectionError: String?
 
     enum SaveStatus: Equatable {
         case saving
@@ -29,6 +32,22 @@ final class TranscriptionViewModel: ObservableObject {
             case .saved(let name): return "Saved “\(name)”"
             case .failed(let msg): return "Save failed: \(msg)"
             }
+        }
+    }
+
+    /// Result of a language detection operation.
+    struct LanguageDetectionResult {
+        let languageCode: String
+        let languageName: String
+        let confidence: Float
+        let alternatives: [(code: String, name: String, probability: Float)]
+
+        var displayText: String {
+            "\(languageName) (\(languageCode.uppercased()))"
+        }
+
+        var confidencePercentage: Int {
+            Int(confidence * 100)
         }
     }
 
@@ -244,6 +263,69 @@ final class TranscriptionViewModel: ObservableObject {
     /// Clear the transient save status (e.g. dismiss toast).
     func clearSaveStatus() {
         saveStatus = nil
+    }
+
+    // MARK: - Language Detection
+
+    /// Detect the spoken language of a task's audio file using WhisperKit.
+    /// Requires a multilingual model (not an ".en" variant).
+    func detectLanguage(taskID: UUID) {
+        guard let task = tasks.first(where: { $0.id == taskID }) else { return }
+        guard !isDetectingLanguage else { return }
+
+        // Skip if already detected
+        if detectedLanguages[taskID] != nil { return }
+
+        isDetectingLanguage = true
+        languageDetectionError = nil
+
+        let audioFileURL = task.audioFile.url
+
+        Task {
+            do {
+                // Load audio samples
+                let (samples, _) = try AudioProcessor.loadAudioAsPCMFloat(audioFileURL)
+
+                // Get engine (must be WhisperKit for language detection)
+                let engine = try getEngine(for: .whisperKit, modelID: task.modelID)
+                guard let whisperEngine = engine as? WhisperKitEngine else {
+                    await MainActor.run {
+                        self.languageDetectionError = "Language detection requires WhisperKit engine"
+                        self.isDetectingLanguage = false
+                    }
+                    return
+                }
+
+                // Detect
+                let result = try await whisperEngine.detectLanguage(audioData: samples)
+                let topLangs = LanguageDetector.topLanguages(from: result.probabilities, limit: 3)
+                let confidence = result.probabilities[result.language] ?? 0
+
+                let detectionResult = LanguageDetectionResult(
+                    languageCode: result.language,
+                    languageName: LanguageDetector.displayName(for: result.language),
+                    confidence: confidence,
+                    alternatives: topLangs
+                )
+
+                await MainActor.run {
+                    self.detectedLanguages[taskID] = detectionResult
+                    self.isDetectingLanguage = false
+                    Logger.info("Language detected for \(task.audioFile.name): \(detectionResult.displayText) (\(detectionResult.confidencePercentage)% confidence)")
+                }
+            } catch {
+                await MainActor.run {
+                    self.languageDetectionError = error.localizedDescription
+                    self.isDetectingLanguage = false
+                    Logger.error("Language detection failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// Get the detected language result for a task, if any.
+    func detectedLanguage(for taskID: UUID) -> LanguageDetectionResult? {
+        detectedLanguages[taskID]
     }
 
     // MARK: - Engine Management

@@ -132,6 +132,38 @@ struct TranscriptionDetailView: View {
                 }
                 .buttonStyle(.bordered)
             } else {
+                // Detect Language button (only for WhisperKit engine)
+                if task.engineType == .whisperKit && canTranscribe {
+                    if transcriptionViewModel.isDetectingLanguage {
+                        ProgressView()
+                            .controlSize(.small)
+                            .help("Detecting language…")
+                    } else if let detection = transcriptionViewModel.detectedLanguage(for: task.id) {
+                        // Show detected language as a pill
+                        HStack(spacing: 4) {
+                            Image(systemName: "globe")
+                                .foregroundStyle(.blue)
+                            Text(detection.languageName)
+                                .font(.caption.bold())
+                            Text("\(detection.confidencePercentage)%")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.blue.opacity(0.1), in: Capsule())
+                        .help("Detected: \(detection.displayText)")
+                    } else {
+                        Button {
+                            transcriptionViewModel.detectLanguage(taskID: task.id)
+                        } label: {
+                            Label("Detect Language", systemImage: "globe")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Detect the spoken language before transcribing")
+                    }
+                }
+
                 Button {
                     transcriptionViewModel.startTranscription(taskID: task.id)
                 } label: {
@@ -224,7 +256,11 @@ struct TranscriptionMetadataView: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            MetadataPill(icon: "globe", label: "Language", value: result.detectedLanguage.uppercased())
+            MetadataPill(
+                icon: "globe",
+                label: "Language",
+                value: LanguageDetector.displayName(for: result.detectedLanguage)
+            )
             MetadataPill(icon: "cpu", label: "Model", value: result.modelUsed)
             MetadataPill(icon: "text.word.spacing", label: "Words", value: "\(result.wordCount)")
             MetadataPill(icon: "clock", label: "Duration", value: TimeFormatter.formatDuration(result.audioDuration))

@@ -190,6 +190,53 @@ final class WhisperKitEngine: TranscriptionEngine {
         Logger.info("WhisperKit transcription cancelled")
     }
 
+    // MARK: - Language Detection
+
+    /// Detect the spoken language of an audio file using WhisperKit.
+    /// Requires a multilingual model (e.g., "openai_whisper-large-v3", not ".en" variants).
+    /// - Parameter audioData: PCM float samples at 16kHz.
+    /// - Returns: The detected language code (e.g., "en", "id") and probability distribution.
+    func detectLanguage(
+        audioData: [Float]
+    ) async throws -> (language: String, probabilities: [String: Float]) {
+        guard let modelID = currentModelID else {
+            throw TranscriptionError.modelNotDownloaded("No model selected")
+        }
+
+        // Initialize WhisperKit if needed
+        if self.whisperKit == nil {
+            Logger.info("Loading WhisperKit model for language detection: \(modelID)")
+            self.whisperKit = try await WhisperKit(
+                model: modelID,
+                downloadBase: AppPaths.modelsDirectory
+            )
+        }
+
+        guard let whisperKit = self.whisperKit else {
+            throw TranscriptionError.modelLoadFailed("Failed to initialize WhisperKit")
+        }
+
+        // Write samples to temp WAV (detectLanguage takes a file path)
+        let tempURL = AppPaths.cacheDirectory.appendingPathComponent("lang_detect_\(UUID().uuidString).wav")
+        let wavData = AudioProcessor.convertFloatSamplesToWAV(audioData)
+        try wavData.write(to: tempURL)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        Logger.info("Detecting language from \(audioData.count) samples")
+        let result = try await LanguageDetector.detect(
+            audioPath: tempURL.path,
+            whisperKit: whisperKit
+        )
+
+        let displayName = LanguageDetector.displayName(for: result.language)
+        Logger.info("Detected language: \(displayName) (\(result.language))")
+
+        return result
+    }
+
     // MARK: - Model Management
 
     /// Set the model to use for transcription.

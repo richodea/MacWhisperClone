@@ -104,6 +104,12 @@ final class AudioProcessor {
         let dataSize = samples.count * bytesPerSample
         let fileSize = 36 + dataSize
 
+        // WAV header fields are unsigned 16/32-bit little-endian. Pre-cast the
+        // 16-bit fields so they can be passed to uint16(_:) without trapping.
+        let numChannelsU16 = UInt16(numChannels)
+        let blockAlignU16 = UInt16(blockAlign)
+        let bitsPerSampleU16 = UInt16(bitsPerSample)
+
         var data = Data()
 
         // RIFF header
@@ -115,21 +121,26 @@ final class AudioProcessor {
         data.append("fmt ".data(using: .ascii)!)
         data.append(uint32(16)) // chunk size
         data.append(uint16(1))  // audio format = PCM
-        data.append(uint16(numChannels))
+        data.append(uint16(numChannelsU16))
         data.append(uint32(sampleRate))
         data.append(uint32(sampleRate * blockAlign)) // byte rate
-        data.append(uint16(blockAlign))
-        data.append(uint16(bitsPerSample))
+        data.append(uint16(blockAlignU16))
+        data.append(uint16(bitsPerSampleU16))
 
         // data chunk
         data.append("data".data(using: .ascii)!)
         data.append(uint32(dataSize))
 
-        // Convert float samples to 16-bit PCM
+        // Convert float samples to 16-bit PCM.
+        // intSample is a signed Int16 (range -32768...32767); for any sample
+        // below the zero crossing it is negative. We must reinterpret its bit
+        // pattern as UInt16 (little-endian two's-complement) — NOT convert via
+        // UInt16(Int(...)), which traps on negative values. This was the cause
+        // of the EXC_BREAKPOINT crash in the live-transcription path.
         for sample in samples {
             let clamped = max(-1.0, min(1.0, sample))
             let intSample = Int16(clamped * Float(Int16.max))
-            data.append(uint16(Int(bitPattern: UInt(bitPattern: Int(intSample)))))
+            data.append(uint16(UInt16(bitPattern: intSample)))
         }
 
         return data
@@ -166,8 +177,12 @@ final class AudioProcessor {
         return Data(bytes: &v, count: 4)
     }
 
-    private static func uint16(_ value: Int) -> Data {
-        var v = UInt16(value)
+    /// Append a little-endian UInt16 to the WAV data.
+    /// Accepts an unsigned value directly so the helper can never trap on
+    /// negative inputs. All callers (audio format, channel count, block align,
+    /// bits per sample, and PCM samples via `UInt16(bitPattern:)`) are unsigned.
+    private static func uint16(_ value: UInt16) -> Data {
+        var v = value
         return Data(bytes: &v, count: 2)
     }
 }

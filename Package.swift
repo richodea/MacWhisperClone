@@ -29,6 +29,11 @@ let package = Package(
                 .product(name: "Defaults", package: "Defaults"),
             ],
             path: "Sources/MacWhisperClone"
+        ),
+        .testTarget(
+            name: "MacWhisperCloneTests",
+            dependencies: ["MacWhisperClone"],
+            path: "Tests/MacWhisperCloneTests"
         )
     ]
 )

@@ -15,6 +15,22 @@ final class TranscriptionViewModel: ObservableObject {
     @Published var isImporting = false
     @Published var errorMessage: String?
     @Published var showError = false
+    @Published var savedSessionIDs: Set<UUID> = []  // Track which tasks have been saved
+    @Published var saveStatus: SaveStatus?
+
+    enum SaveStatus: Equatable {
+        case saving
+        case saved(String)  // session name
+        case failed(String)  // error message
+
+        var message: String {
+            switch self {
+            case .saving: return "Saving…"
+            case .saved(let name): return "Saved “\(name)”"
+            case .failed(let msg): return "Save failed: \(msg)"
+            }
+        }
+    }
 
     // MARK: Dependencies
 
@@ -131,14 +147,10 @@ final class TranscriptionViewModel: ObservableObject {
                                     self.tasks[taskIdx].result = transcriptionResult
                                     self.tasks[taskIdx].completedAt = Date()
 
-                                    // Save to database
-                                    do {
-                                        _ = try self.database.saveSession(
-                                            audioFile: audioFile,
-                                            result: transcriptionResult
-                                        )
-                                    } catch {
-                                        Logger.error("Failed to save session: \(error.localizedDescription)")
+                                    // Auto-save if enabled in settings
+                                    let autoSaveEnabled = UserDefaults.standard.object(forKey: "enable_autosave") as? Bool ?? true
+                                    if autoSaveEnabled {
+                                        self.saveSession(taskID: taskID)
                                     }
 
                                     Logger.info("Transcription completed: \(audioFile.name)")
@@ -180,6 +192,58 @@ final class TranscriptionViewModel: ObservableObject {
         if selectedTaskID == taskID {
             selectedTaskID = tasks.first?.id
         }
+        savedSessionIDs.remove(taskID)
+    }
+
+    // MARK: - Session Saving
+
+    /// Manually save a completed transcription session to the database.
+    /// Used when auto-save is off, or to re-save after edits.
+    func saveSession(taskID: UUID) {
+        guard let task = tasks.first(where: { $0.id == taskID }),
+              let result = task.result else {
+            saveStatus = .failed("No transcription to save")
+            return
+        }
+
+        // Skip if already saved (avoid duplicates)
+        guard !savedSessionIDs.contains(taskID) else {
+            saveStatus = .saved(task.audioFile.name)
+            return
+        }
+
+        saveStatus = .saving
+
+        let audioFile = task.audioFile
+
+        Task.detached(priority: .utility) {
+            do {
+                _ = try DatabaseManager.shared.saveSession(
+                    audioFile: audioFile,
+                    result: result
+                )
+                await MainActor.run { [weak self] in
+                    self?.savedSessionIDs.insert(taskID)
+                    self?.saveStatus = .saved(audioFile.name)
+                    Logger.info("Session saved: \(audioFile.name)")
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.saveStatus = .failed(error.localizedDescription)
+                    Logger.error("Failed to save session: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// Whether a task has been saved to the database.
+    func isTaskSaved(_ taskID: UUID) -> Bool {
+        savedSessionIDs.contains(taskID)
+    }
+
+    /// Clear the transient save status (e.g. dismiss toast).
+    func clearSaveStatus() {
+        saveStatus = nil
     }
 
     // MARK: - Engine Management
@@ -263,6 +327,7 @@ final class TranscriptionViewModel: ObservableObject {
                 )
 
                 tasks.append(task)
+                savedSessionIDs.insert(task.id)  // Mark loaded sessions as already saved
             }
 
             Logger.info("Loaded \(sessions.count) saved sessions")

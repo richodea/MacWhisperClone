@@ -41,6 +41,23 @@ struct LiveTranscriptionView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 if !liveViewModel.segments.isEmpty {
+                    // Save button (when stopped and not yet saved)
+                    if liveViewModel.state == .stopped && !liveViewModel.isSessionSaved {
+                        Button {
+                            liveViewModel.saveLiveSession()
+                        } label: {
+                            Label("Save", systemImage: "tray.and.arrow.down")
+                        }
+                        .help("Save this session to your library")
+                    }
+
+                    // Saved indicator
+                    if liveViewModel.isSessionSaved {
+                        Label("Saved", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .labelStyle(.iconOnly)
+                    }
+
                     Button {
                         showExportSheet = true
                     } label: {
@@ -52,6 +69,16 @@ struct LiveTranscriptionView: View {
         .sheet(isPresented: $showExportSheet) {
             LiveExportSheet(viewModel: liveViewModel)
         }
+        .overlay(alignment: .bottom) {
+            if let status = liveViewModel.saveStatus {
+                SaveStatusToast(status: status) {
+                    liveViewModel.clearSaveStatus()
+                }
+                .padding(.bottom, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: liveViewModel.saveStatus)
     }
 
     // MARK: - Source Selector

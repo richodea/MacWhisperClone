@@ -76,6 +76,22 @@ final class LiveTranscriptionViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var recordingDuration: TimeInterval = 0
     @Published var audioLevel: Float = 0
+    @Published var isSessionSaved: Bool = false
+    @Published var saveStatus: SaveStatus?
+
+    enum SaveStatus: Equatable {
+        case saving
+        case saved(String)
+        case failed(String)
+
+        var message: String {
+            switch self {
+            case .saving: return "Saving session…"
+            case .saved(let name): return "Saved “\(name)”"
+            case .failed(let msg): return "Save failed: \(msg)"
+            }
+        }
+    }
 
     // MARK: Dependencies
 
@@ -120,6 +136,8 @@ final class LiveTranscriptionViewModel: ObservableObject {
         segments.removeAll()
         partialText = ""
         recordingDuration = 0
+        isSessionSaved = false
+        saveStatus = nil
         liveEngine.reset()
 
         state = .requestingPermission
@@ -156,8 +174,9 @@ final class LiveTranscriptionViewModel: ObservableObject {
                 self.partialText = text
                 self.state = .stopped
 
-                // Save to database if we have segments
-                if !segments.isEmpty {
+                // Auto-save if enabled in settings and we have segments
+                let autoSaveEnabled = UserDefaults.standard.object(forKey: "enable_autosave") as? Bool ?? true
+                if autoSaveEnabled && !segments.isEmpty {
                     self.saveLiveSession()
                 }
             }
@@ -346,13 +365,23 @@ final class LiveTranscriptionViewModel: ObservableObject {
 
     // MARK: - Save Session
 
-    private func saveLiveSession() {
-        guard !segments.isEmpty else { return }
+    /// Save the current live transcription session to the database.
+    /// Called automatically on stop (if auto-save is on) or manually via the Save button.
+    func saveLiveSession() {
+        guard !segments.isEmpty else {
+            saveStatus = .failed("No segments to save")
+            return
+        }
+        guard !isSessionSaved else {
+            saveStatus = .saved("Live Transcription")
+            return
+        }
 
         // Create a virtual audio file for the live session
+        let sessionName = "Live Transcription - \(Date().formatted(date: .abbreviated, time: .shortened))"
         let audioFile = AudioFile(
             url: URL(fileURLWithPath: "/dev/null"),
-            name: "Live Transcription - \(Date().formatted(date: .abbreviated, time: .shortened))",
+            name: sessionName,
             duration: recordingDuration,
             sampleRate: 16000,
             channels: 1
@@ -367,12 +396,29 @@ final class LiveTranscriptionViewModel: ObservableObject {
             audioDuration: recordingDuration
         )
 
-        do {
-            _ = try database.saveSession(audioFile: audioFile, result: result)
-            Logger.info("Live transcription session saved (\(segments.count) segments)")
-        } catch {
-            Logger.error("Failed to save live session: \(error.localizedDescription)")
+        saveStatus = .saving
+
+        Task.detached(priority: .utility) {
+            do {
+                _ = try DatabaseManager.shared.saveSession(audioFile: audioFile, result: result)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.isSessionSaved = true
+                    self.saveStatus = .saved(sessionName)
+                    Logger.info("Live transcription session saved (\(self.segments.count) segments)")
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.saveStatus = .failed(error.localizedDescription)
+                    Logger.error("Failed to save live session: \(error.localizedDescription)")
+                }
+            }
         }
+    }
+
+    /// Clear the transient save status (e.g. dismiss toast).
+    func clearSaveStatus() {
+        saveStatus = nil
     }
 
     // MARK: - Settings

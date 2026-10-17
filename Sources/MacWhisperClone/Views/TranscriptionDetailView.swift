@@ -59,6 +59,16 @@ struct TranscriptionDetailView: View {
         }
         .navigationTitle(task.audioFile.name)
         .navigationSubtitle(task.state.displayName)
+        .overlay(alignment: .bottom) {
+            if let status = transcriptionViewModel.saveStatus {
+                SaveStatusToast(status: status) {
+                    transcriptionViewModel.clearSaveStatus()
+                }
+                .padding(.bottom, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: transcriptionViewModel.saveStatus)
     }
 
     // MARK: - Toolbar
@@ -98,6 +108,22 @@ struct TranscriptionDetailView: View {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(.bordered)
+
+                // Save button (shown when not yet saved, or to re-save)
+                if transcriptionViewModel.isTaskSaved(task.id) {
+                    Label("Saved", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                        .labelStyle(.iconOnly)
+                } else {
+                    Button {
+                        transcriptionViewModel.saveSession(taskID: task.id)
+                    } label: {
+                        Label("Save", systemImage: "tray.and.arrow.down")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Save this transcription to your library")
+                }
 
                 Button {
                     transcriptionViewModel.startTranscription(taskID: task.id)
@@ -343,5 +369,76 @@ struct FlowLayout: Layout {
             x += size.width + spacing
             lineHeight = max(lineHeight, size.height)
         }
+    }
+}
+
+// MARK: - Save Status Toast
+
+/// A transient toast that shows save status feedback.
+/// Works with both `TranscriptionViewModel.SaveStatus` and `LiveTranscriptionViewModel.SaveStatus`.
+struct SaveStatusToast: View {
+    enum Kind {
+        case saving, saved, failed
+    }
+
+    let kind: Kind
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            switch kind {
+            case .saving:
+                ProgressView()
+                    .controlSize(.small)
+            case .saved:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            case .failed:
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.primary)
+
+            Spacer(minLength: 12)
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+        .padding(.horizontal, 24)
+    }
+}
+
+// Convenience initializers for each view model's SaveStatus
+extension SaveStatusToast {
+    init(status: TranscriptionViewModel.SaveStatus, onDismiss: @escaping () -> Void) {
+        let kind: Kind
+        switch status {
+        case .saving: kind = .saving
+        case .saved: kind = .saved
+        case .failed: kind = .failed
+        }
+        self.init(kind: kind, message: status.message, onDismiss: onDismiss)
+    }
+
+    init(status: LiveTranscriptionViewModel.SaveStatus, onDismiss: @escaping () -> Void) {
+        let kind: Kind
+        switch status {
+        case .saving: kind = .saving
+        case .saved: kind = .saved
+        case .failed: kind = .failed
+        }
+        self.init(kind: kind, message: status.message, onDismiss: onDismiss)
     }
 }

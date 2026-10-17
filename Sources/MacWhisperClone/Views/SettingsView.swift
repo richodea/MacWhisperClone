@@ -118,5 +118,16 @@ struct SettingsView: View {
         .onChange(of: settingsViewModel.theme) { _, _ in settingsViewModel.saveSettings() }
         .onChange(of: settingsViewModel.enableMetal) { _, _ in settingsViewModel.saveSettings() }
         .onChange(of: settingsViewModel.enableWordTimestamps) { _, _ in settingsViewModel.saveSettings() }
+        .onChange(of: settingsViewModel.enableAutoSave) { _, _ in settingsViewModel.saveSettings() }
+        .onChange(of: settingsViewModel.defaultLanguage) { _, _ in settingsViewModel.saveSettings() }
+        .onChange(of: selectedLanguage) { _, newValue in
+            settingsViewModel.defaultLanguage = newValue.code
+        }
+        .onAppear {
+            // Sync picker with stored default language
+            if let lang = SupportedLanguage.allCases.first(where: { $0.code == settingsViewModel.defaultLanguage }) {
+                selectedLanguage = lang
+            }
+        }
     }
 }

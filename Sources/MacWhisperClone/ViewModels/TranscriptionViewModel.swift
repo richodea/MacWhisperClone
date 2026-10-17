@@ -21,6 +21,12 @@ final class TranscriptionViewModel: ObservableObject {
     @Published var isDetectingLanguage: Bool = false
     @Published var languageDetectionError: String?
 
+    // Diarization state (per-task)
+    @Published var diarizedTaskIDs: Set<UUID> = []  // Tasks that have been diarized
+    @Published var isDiarizing: Bool = false
+    @Published var diarizationError: String?
+    @Published var diarizationSpeakerCounts: [UUID: Int] = [:]  // Per-task speaker count
+
     enum SaveStatus: Equatable {
         case saving
         case saved(String)  // session name
@@ -170,6 +176,12 @@ final class TranscriptionViewModel: ObservableObject {
                                     let autoSaveEnabled = UserDefaults.standard.object(forKey: "enable_autosave") as? Bool ?? true
                                     if autoSaveEnabled {
                                         self.saveSession(taskID: taskID)
+                                    }
+
+                                    // Auto-diarize if enabled in settings
+                                    let autoDiarizeEnabled = UserDefaults.standard.object(forKey: "enable_diarization") as? Bool ?? false
+                                    if autoDiarizeEnabled {
+                                        self.diarize(taskID: taskID)
                                     }
 
                                     Logger.info("Transcription completed: \(audioFile.name)")
@@ -326,6 +338,76 @@ final class TranscriptionViewModel: ObservableObject {
     /// Get the detected language result for a task, if any.
     func detectedLanguage(for taskID: UUID) -> LanguageDetectionResult? {
         detectedLanguages[taskID]
+    }
+
+    // MARK: - Speaker Diarization
+
+    /// Run on-device speaker diarization on a completed task.
+    ///
+    /// Loads the audio, slices it by segment timestamps, extracts MFCC features
+    /// per segment, and clusters them with k-means to assign "Speaker N" labels.
+    /// Results are written into each segment's `speaker` field.
+    func diarize(taskID: UUID) {
+        guard let task = tasks.first(where: { $0.id == taskID }) else { return }
+        guard !isDiarizing else { return }
+        guard let result = task.result, !result.segments.isEmpty else { return }
+        // Skip if already diarized.
+        if diarizedTaskIDs.contains(taskID) { return }
+
+        isDiarizing = true
+        diarizationError = nil
+
+        let audioFileURL = task.audioFile.url
+        // Capture segment timings (value types) for off-main work.
+        let segmentTimings: [(startTime: TimeInterval, endTime: TimeInterval)] = result.segments.map {
+            ($0.startTime, $0.endTime)
+        }
+
+        Task.detached(priority: .utility) { [weak self] in
+            do {
+                let (samples, _) = try AudioProcessor.loadAudioAsPCMFloat(audioFileURL)
+                let diarizationResult = SpeakerDiarizer.diarize(
+                    samples: samples,
+                    segments: segmentTimings
+                )
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    guard let taskIdx = self.tasks.firstIndex(where: { $0.id == taskID }) else {
+                        self.isDiarizing = false
+                        return
+                    }
+                    guard var result = self.tasks[taskIdx].result else {
+                        self.isDiarizing = false
+                        return
+                    }
+                    // Apply speaker labels to each segment.
+                    for i in 0..<result.segments.count {
+                        result.segments[i].speaker = diarizationResult.speakerLabels[i]
+                    }
+                    self.tasks[taskIdx].result = result
+                    self.diarizedTaskIDs.insert(taskID)
+                    self.diarizationSpeakerCounts[taskID] = diarizationResult.speakerCount
+                    self.isDiarizing = false
+                    Logger.info("Diarized \(task.audioFile.name): \(diarizationResult.speakerCount) speaker(s)")
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.diarizationError = error.localizedDescription
+                    self?.isDiarizing = false
+                    Logger.error("Diarization failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// Whether a task has already been diarized.
+    func isTaskDiarized(_ taskID: UUID) -> Bool {
+        diarizedTaskIDs.contains(taskID)
+    }
+
+    /// Speaker count for a diarized task, if any.
+    func speakerCount(for taskID: UUID) -> Int? {
+        diarizationSpeakerCounts[taskID]
     }
 
     // MARK: - Engine Management

@@ -16,6 +16,7 @@ final class SettingsViewModel: ObservableObject {
     @Published var enableMetal: Bool = true
     @Published var enableWordTimestamps: Bool = true
     @Published var enableAutoSave: Bool = true
+    @Published var enableDiarization: Bool = false  // Auto-run speaker diarization after transcription
     @Published var theme: AppTheme = .system
 
     // MARK: Initialization
@@ -34,6 +35,7 @@ final class SettingsViewModel: ObservableObject {
         enableMetal = UserDefaults.standard.object(forKey: "enable_metal") as? Bool ?? true
         enableWordTimestamps = UserDefaults.standard.object(forKey: "enable_word_timestamps") as? Bool ?? true
         enableAutoSave = UserDefaults.standard.object(forKey: "enable_autosave") as? Bool ?? true
+        enableDiarization = UserDefaults.standard.object(forKey: "enable_diarization") as? Bool ?? false
         let themeRaw = UserDefaults.standard.string(forKey: "theme") ?? "system"
         theme = AppTheme(rawValue: themeRaw) ?? .system
     }
@@ -46,6 +48,7 @@ final class SettingsViewModel: ObservableObject {
         UserDefaults.standard.set(enableMetal, forKey: "enable_metal")
         UserDefaults.standard.set(enableWordTimestamps, forKey: "enable_word_timestamps")
         UserDefaults.standard.set(enableAutoSave, forKey: "enable_autosave")
+        UserDefaults.standard.set(enableDiarization, forKey: "enable_diarization")
         UserDefaults.standard.set(theme.rawValue, forKey: "theme")
         Logger.info("Settings saved")
     }

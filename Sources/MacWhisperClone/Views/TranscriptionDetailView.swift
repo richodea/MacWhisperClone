@@ -125,6 +125,42 @@ struct TranscriptionDetailView: View {
                     .help("Save this transcription to your library")
                 }
 
+                // Diarize button (separate speakers)
+                if transcriptionViewModel.isDiarizing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .help("Separating speakers…")
+                } else if transcriptionViewModel.isTaskDiarized(task.id) {
+                    if let count = transcriptionViewModel.speakerCount(for: task.id) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.2.fill")
+                                .foregroundStyle(.purple)
+                            Text("\(count)")
+                                .font(.caption.bold())
+                            Text(count == 1 ? "speaker" : "speakers")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.purple.opacity(0.1), in: Capsule())
+                        .help("Speakers separated — click to re-run")
+                        .onTapGesture {
+                            // Allow re-running diarization by clearing the flag.
+                            transcriptionViewModel.diarizedTaskIDs.remove(task.id)
+                            transcriptionViewModel.diarize(taskID: task.id)
+                        }
+                    }
+                } else {
+                    Button {
+                        transcriptionViewModel.diarize(taskID: task.id)
+                    } label: {
+                        Label("Separate Speakers", systemImage: "person.2")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Identify and label different speakers in the recording")
+                }
+
                 Button {
                     transcriptionViewModel.startTranscription(taskID: task.id)
                 } label: {
@@ -215,9 +251,17 @@ struct SegmentRowView: View {
                 // Text
                 VStack(alignment: .leading, spacing: 2) {
                     if let speaker = segment.speaker {
-                        Text(speaker)
-                            .font(.caption.bold())
-                            .foregroundStyle(.blue)
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(SpeakerColors.color(for: speaker))
+                                .frame(width: 8, height: 8)
+                            Text(speaker)
+                                .font(.caption.bold())
+                                .foregroundStyle(SpeakerColors.color(for: speaker))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(SpeakerColors.color(for: speaker).opacity(0.1), in: Capsule())
                     }
 
                     if showWordTimestamps, let words = segment.words {
@@ -245,6 +289,24 @@ struct SegmentRowView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// Stable per-speaker color assignment for diarization labels.
+enum SpeakerColors {
+    private static let palette: [Color] = [
+        .blue, .purple, .orange, .green, .pink, .teal, .indigo, .brown
+    ]
+
+    /// Map a speaker label like "Speaker 3" to a stable color.
+    static func color(for speaker: String) -> Color {
+        // Extract trailing number; fall back to hash.
+        let digits = speaker.compactMap(\.wholeNumberValue)
+        if let n = digits.last, n > 0 {
+            return palette[(n - 1) % palette.count]
+        }
+        let hash = abs(speaker.hashValue)
+        return palette[hash % palette.count]
     }
 }
 

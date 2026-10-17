@@ -71,6 +71,8 @@ struct SettingsView: View {
                 Toggle("Metal GPU Acceleration", isOn: $settingsViewModel.enableMetal)
                 Toggle("Word-level Timestamps", isOn: $settingsViewModel.enableWordTimestamps)
                 Toggle("Auto-save Transcriptions", isOn: $settingsViewModel.enableAutoSave)
+                Toggle("Auto-separate Speakers", isOn: $settingsViewModel.enableDiarization)
+                    .help("Run speaker diarization automatically after each transcription completes")
 
                 HStack {
                     Text("Temperature")
@@ -119,6 +121,7 @@ struct SettingsView: View {
         .onChange(of: settingsViewModel.enableMetal) { _, _ in settingsViewModel.saveSettings() }
         .onChange(of: settingsViewModel.enableWordTimestamps) { _, _ in settingsViewModel.saveSettings() }
         .onChange(of: settingsViewModel.enableAutoSave) { _, _ in settingsViewModel.saveSettings() }
+        .onChange(of: settingsViewModel.enableDiarization) { _, _ in settingsViewModel.saveSettings() }
         .onChange(of: settingsViewModel.defaultLanguage) { _, _ in settingsViewModel.saveSettings() }
         .onChange(of: selectedLanguage) { _, newValue in
             settingsViewModel.defaultLanguage = newValue.code
